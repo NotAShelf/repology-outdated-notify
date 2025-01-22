@@ -1,15 +1,11 @@
-{ pkgs ? import <nixpkgs> {} }:
-
+{pkgs ? import <nixpkgs> {}}:
 pkgs.mkShell {
-  buildInputs = (with pkgs; [
-    python3Full
-  ]) ++ (with pkgs.python3Packages; [
-    # Tools
-    black
-    mypy
-
-    # Dependencies
-    feedparser
-    requests
-  ]);
+  packages = [
+    (pkgs.python3.withPackages (python-pkgs:
+      with python-pkgs; [
+        # Dependencies
+        feedparser
+        requests
+      ]))
+  ];
 }
