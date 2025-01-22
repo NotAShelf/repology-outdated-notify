@@ -28,17 +28,18 @@ import urllib.parse
 from typing import Deque, Iterable, Sequence
 
 
-def validate_environment():
+def validate_environment(local_mode: bool):
     """Validate required tools are available."""
-    try:
-        subprocess.run(
-            ["sendmail", "--version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        logging.error("sendmail is not installed or not available in PATH.")
-        sys.exit(1)
+    if not local_mode:
+        try:
+            subprocess.run(
+                ["sendmail", "--version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            logging.error("sendmail is not installed or not available in PATH.")
+            sys.exit(1)
 
 
 def exponential_backoff(base: int, attempt: int) -> int:
@@ -135,7 +136,6 @@ def send_github_notification(repo: str, token: str, update: Update):
 
 def main(argv: Sequence[str]) -> int:
     logging.basicConfig(level=logging.INFO)
-
     parser = argparse.ArgumentParser(
         prog=argv[0],
         description="Notifies of outdated maintainer packages on Repology.",
@@ -169,13 +169,23 @@ def main(argv: Sequence[str]) -> int:
         help="GitHub repository on which to create a notification issue. Example: delroth/maintained-packages.",
     )
     parser.add_argument("-t", "--token", type=str, help="GitHub access token.")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Log updates to stdout instead of sending notifications.",
+    )
+
     args = parser.parse_args(argv[1:])
 
+    # Ensure mutual exclusivity
+    if args.local and (args.email or args.github_repo):
+        parser.error("--local cannot be used with --email or --github-repo.")
+        return 1
     if args.github_repo is not None and args.token is None:
         parser.error("Token (-t) is required if using GitHub notifications.")
         return 1
 
-    validate_environment()
+    validate_environment(local_mode=args.local)
 
     poller = RepologyPoller(
         maintainer=args.maintainer,
@@ -187,7 +197,8 @@ def main(argv: Sequence[str]) -> int:
         try:
             logging.info("Polling for updates")
             for update in poller.check_for_updates():
-                logging.info("Update found: %r", update)
+                if args.local:
+                    logging.info("Update found: %r", update)
                 if args.email:
                     send_email_notification(args.email, update)
                 if args.github_repo:
@@ -200,7 +211,6 @@ def main(argv: Sequence[str]) -> int:
             logging.info("Retrying in %d seconds...", backoff_time)
             time.sleep(backoff_time)
             continue
-
         time.sleep(args.interval)
 
     return 0
